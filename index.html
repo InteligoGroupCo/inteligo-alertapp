@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Inteligo AlertApp</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: { sans: ['Sora','sans-serif'] },
+      colors: {
+        'ig-blue':'#0041a3','ig-dark':'#00164f','ig-teal':'#00c0d0',
+        'ig-orange':'#ff8c42','ig-red':'#ff6751','ig-yellow':'#ffbc54'
+      }
+    }
+  }
+}
+</script>
+<style>
+* { box-sizing: border-box; }
+body { font-family: 'Sora', sans-serif; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+.animate-fadeIn { animation: fadeIn .2s ease forwards; }
+@keyframes pulseRed { 0%,100%{box-shadow:0 0 0 0 rgba(255,103,81,.5)} 50%{box-shadow:0 0 0 8px rgba(255,103,81,0)} }
+.pulse-red { animation: pulseRed 1.5s infinite; }
+@keyframes bounceIn { 0%{transform:scale(0)} 80%{transform:scale(1.1)} 100%{transform:scale(1)} }
+.bounce-in { animation: bounceIn .4s ease forwards; }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+<div id="app">
+  <div class="min-h-screen flex items-center justify-center bg-[#00164f]">
+    <div class="text-white/50 text-sm">Conectando...</div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.11.1/firebase-auth.js";
+import {
+  getFirestore, collection, doc, addDoc, updateDoc, onSnapshot,
+  query, orderBy, where, serverTimestamp, getDoc, setDoc, writeBatch, Timestamp
+} from "https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore.js";
+
+// ══════════════════════════════════════════════════════════
+//  FIREBASE CONFIG
+// ══════════════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyDy2xpo-B_6inDFzxIQ7xzuFd6Ih6qeDyM",
+  authDomain: "inteligo-alertapp.firebaseapp.com",
+  projectId: "inteligo-alertapp",
+  storageBucket: "inteligo-alertapp.firebasestorage.app",
+  messagingSenderId: "1073027418046",
+  appId: "1:1073027418046:web:859f49386caecfb9421bef"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const auth  = getAuth(fbApp);
+const db    = getFirestore(fbApp);
+
+// ══════════════════════════════════════════════════════════
+//  DATOS SEMILLA
+// ══════════════════════════════════════════════════════════
+const ROOMS_SEED = [
+  {id:'sala-1',  name:'Sala 1',  type:'sala', active:true, urlSlug:'1'},
+  {id:'sala-2',  name:'Sala 2',  type:'sala', active:true, urlSlug:'2'},
+  {id:'sala-3',  name:'Sala 3',  type:'sala', active:true, urlSlug:'3'},
+  {id:'sala-4',  name:'Sala 4',  type:'sala', active:true, urlSlug:'4'},
+  {id:'sala-5',  name:'Sala 5',  type:'sala', active:true, urlSlug:'5'},
+  {id:'sala-6',  name:'Sala 6',  type:'sala', active:true, urlSlug:'6'},
+  {id:'sala-7',  name:'Sala 7',  type:'sala', active:true, urlSlug:'7'},
+  {id:'sala-8',  name:'Sala 8',  type:'sala', active:true, urlSlug:'8'},
+  {id:'sala-9',  name:'Sala 9',  type:'sala', active:true, urlSlug:'9'},
+  {id:'sala-10', name:'Sala 10', type:'sala', active:true, urlSlug:'10'},
+  {id:'sala-11', name:'Sala 11', type:'sala', active:true, urlSlug:'11'},
+  {id:'directorio-p22', name:'Directorio P22', type:'directorio', active:true, urlSlug:'directorio-p22'},
+  {id:'directorio-p7',  name:'Directorio P7',  type:'directorio', active:true, urlSlug:'directorio-p7'},
+];
+
+const CATS_SEED = [
+  {id:'soporte',    name:'Soporte Técnico', priority:'high',   icon:'🖥️', directorioVisible:true, subitems:[
+    {id:'proyector',name:'Proyector no funciona',icon:'📽️'},
+    {id:'audio',    name:'Problema de audio',    icon:'🔊'},
+    {id:'pantalla', name:'Problema de pantalla', icon:'🖥️'},
+    {id:'conexion', name:'Problema de conexión', icon:'📡'}]},
+  {id:'asistencia', name:'Asistencia',       priority:'medium', icon:'🤝', directorioVisible:true, subitems:[
+    {id:'mozo',     name:'Solicitar mozo',     icon:'🤝'},
+    {id:'recepcion',name:'Solicitar recepción',icon:'📞'},
+    {id:'limpieza', name:'Solicitar limpieza', icon:'🧹'}]},
+  {id:'cafes',      name:'Cafés',            priority:'low',    icon:'☕', directorioVisible:true, subitems:[
+    {id:'capuccino',name:'Capuccino',icon:'☕'},
+    {id:'americano',name:'Americano',icon:'☕'},
+    {id:'expreso',  name:'Expreso',  icon:'☕'},
+    {id:'cortado',  name:'Cortado',  icon:'☕'}]},
+  {id:'infusiones', name:'Infusiones',       priority:'low',    icon:'🍵', directorioVisible:true, subitems:[
+    {id:'manzanilla', name:'Manzanilla',  icon:'🍵'},
+    {id:'anis',       name:'Anís',        icon:'🌿'},
+    {id:'te',         name:'Té',          icon:'🍵'},
+    {id:'hierbaluisa',name:'Hierba Luisa',icon:'🌿'},
+    {id:'teverde',    name:'Té verde',    icon:'🍵'}]},
+  {id:'agua',       name:'Agua',             priority:'low',    icon:'💧', directorioVisible:true, subitems:[
+    {id:'agua-gas', name:'Agua c/gas',icon:'💧'},
+    {id:'agua-sgas',name:'Agua s/gas',icon:'💧'}]},
+  {id:'gaseosas',   name:'Gaseosas',         priority:'low',    icon:'🥤', directorioVisible:false, subitems:[
+    {id:'inka-r',name:'Inka Cola Regular',icon:'🥤'},
+    {id:'inka-z',name:'Inka Cola Zero',   icon:'🥤'},
+    {id:'coca-r',name:'Coca Cola Regular',icon:'🥤'},
+    {id:'coca-z',name:'Coca Cola Zero',   icon:'🥤'}]},
+  {id:'cocteles',   name:'Cócteles',         priority:'low',    icon:'🍹', directorioVisible:false, onlyDays:'Solo Viernes', subitems:[
+    {id:'whisky',name:'Whisky',icon:'🥃'},
+    {id:'aperol',name:'Aperol',icon:'🍊'}]},
+  {id:'bocaditos',  name:'Bocaditos',        priority:'low',    icon:'🥐', directorioVisible:false, note:'Martes - Jueves', subitems:[]},
+];
+
+const WIFI_SEED = {ssid:'ITLWLIM03', user:'Invitado', password:'H0l@JuN26$'};
+
+// ══════════════════════════════════════════════════════════
+//  USUARIOS PREDEFINIDOS
+// ══════════════════════════════════════════════════════════
+const USERS_SEED = [
+  {uid:'X62Er7gXCwcfeqoI5SU0o12bNlb2', email:'administracion@inteligogroup.com', displayName:'Administración', role:'admin',    active:true},
+  {uid:'cazCTIqUIRSqLmNeCjNX31ufQQr1', email:'atencionalcliente@inteligogroup.com', displayName:'Atención al Cliente', role:'recepcion', active:true},
+];
+
+// ══════════════════════════════════════════════════════════
+//  ESTADO GLOBAL
+// ══════════════════════════════════════════════════════════
+let currentUser     = null;
+let currentUserRole = null;
+let rooms           = [];
+let categories      = [];
+let alerts          = [];
+let wifi            = WIFI_SEED;
+let openSub         = null;
+let chartTrend      = null;
+let chartSala       = null;
+let panelFilter     = 'all';
+let reportRange     = '7d';
+let reportRoom      = 'all';
+let adminUsers      = [];
+let unsubAlerts     = null;
+let unsubUsers      = null;
+
+// ══════════════════════════════════════════════════════════
+//  SEED FIRESTORE
+// ══════════════════════════════════════════════════════════
+async function seedIfEmpty() {
+  try {
+    const snap = await getDoc(doc(db,'config','seeded'));
+    if (snap.exists()) return;
+    const batch = writeBatch(db);
+    ROOMS_SEED.forEach(r  => batch.set(doc(db,'rooms',r.id), r));
+    CATS_SEED.forEach(c   => batch.set(doc(db,'categories',c.id), c));
+    USERS_SEED.forEach(u  => batch.set(doc(db,'users',u.uid), u));
+    batch.set(doc(db,'config','wifi'),   {...WIFI_SEED, updatedAt: serverTimestamp()});
+    batch.set(doc(db,'config','seeded'), {at: serverTimestamp()});
+    await batch.commit();
+    console.log('✅ Firestore inicializado');
+  } catch(e) { console.warn('Seed:', e.message); }
+}
+
+// ══════════════════════════════════════════════════════════
+//  LISTENERS EN TIEMPO REAL
+// ══════════════════════════════════════════════════════════
+function startListeners() {
+  onSnapshot(collection(db,'rooms'), snap => {
+    rooms = snap.docs.map(d=>({id:d.id,...d.data()}))
+      .sort((a,b)=>a.name.localeCompare(b.name, 'es', {numeric:true}));
+    const v = getView();
+    if (v==='panel') renderPanel();
+    if (v==='admin-salas') renderAdminSalas();
+  });
+  onSnapshot(collection(db,'categories'), snap => {
+    categories = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const v = getView();
+    if (v==='admin-solicitudes') renderAdminSolicitudes();
+  });
+  onSnapshot(doc(db,'config','wifi'), snap => {
+    if (snap.exists()) wifi = snap.data();
+    const v = getView();
+    if (v.startsWith('sala-')) renderSala(v.replace('sala-',''));
+    if (v==='admin-wifi') renderAdminWifi();
+  });
+  if (unsubAlerts) unsubAlerts();
+  unsubAlerts = onSnapshot(
+    query(collection(db,'alerts'), orderBy('createdAt','desc')),
+    snap => {
+      const prev = alerts.length;
+      alerts = snap.docs.map(d => {
+        const data = d.data();
+        return {...data, id:d.id,
+          createdAt:  data.createdAt  instanceof Timestamp ? data.createdAt.toDate()  : new Date(),
+          attendedAt: data.attendedAt instanceof Timestamp ? data.attendedAt.toDate() : null,
+          completedAt:data.completedAt instanceof Timestamp ? data.completedAt.toDate(): null,
+        };
+      });
+      if (alerts.length > prev && prev > 0) playBeep();
+      const v = getView();
+      if (v==='panel') renderPanel();
+      if (v==='reportes') renderReportes();
+    }
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+//  AUDIO
+// ══════════════════════════════════════════════════════════
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o1=ctx.createOscillator(), o2=ctx.createOscillator(), g=ctx.createGain();
+    o1.frequency.value=880; o2.frequency.value=1100;
+    o1.connect(g); o2.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(.25,ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.6);
+    o1.start(); o1.stop(ctx.currentTime+.2);
+    o2.start(ctx.currentTime+.25); o2.stop(ctx.currentTime+.55);
+  } catch(e){}
+}
+
+// ══════════════════════════════════════════════════════════
+//  ROUTER
+// ══════════════════════════════════════════════════════════
+function getView() {
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('sala')) return 'sala-'+p.get('sala');
+  return p.get('view') || 'auto';
+}
+
+function navigate(view, extra) {
+  window.history.pushState({}, '', '?' + (extra || 'view='+view));
+  route();
+}
+
+function route() {
+  const v = getView();
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('sala')) { renderSala(p.get('sala')); return; }
+  if (!currentUser)  { renderLogin(); return; }
+  if (v==='panel'    || v==='auto')         { renderPanel(); return; }
+  if (v==='reportes')                        { renderReportes(); return; }
+  if (v==='admin-salas')                     { renderAdminSalas(); return; }
+  if (v==='admin-solicitudes')               { renderAdminSolicitudes(); return; }
+  if (v==='admin-wifi')                      { renderAdminWifi(); return; }
+  if (v==='admin-usuarios')                  { renderAdminUsuarios(); return; }
+  renderPanel();
+}
+
+window.nav = v => navigate(v);
+window.addEventListener('popstate', route);
+
+// ══════════════════════════════════════════════════════════
+//  SVG LOGO
+// ══════════════════════════════════════════════════════════
+const LOGO_W = `<svg width="34" height="26" viewBox="0 0 36 28" fill="none"><path d="M3 21L11 10L17 16L24 5L33 10" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+// ══════════════════════════════════════════════════════════
+//  SIDEBAR
+// ══════════════════════════════════════════════════════════
+function sidebar(current) {
+  const role = currentUserRole||'';
+  const items = [
+    {v:'panel',             icon:'🔔', label:'Alertas',     roles:['mozo','recepcion','admin']},
+    {v:'reportes',          icon:'📊', label:'Reportes',    roles:['recepcion','admin']},
+    {v:'admin-salas',       icon:'🚪', label:'Salas',       roles:['admin']},
+    {v:'admin-solicitudes', icon:'📋', label:'Solicitudes', roles:['admin']},
+    {v:'admin-wifi',        icon:'📶', label:'Wi-Fi',       roles:['admin']},
+    {v:'admin-usuarios',    icon:'👥', label:'Usuarios',    roles:['admin']},
+  ].filter(i=>i.roles.includes(role));
+
+  return `<aside class="w-52 bg-[#00164f] flex flex-col flex-shrink-0 min-h-screen fixed left-0 top-0 bottom-0 z-30">
+    <div class="px-4 py-4 flex items-center gap-2.5 border-b border-white/10">
+      ${LOGO_W}
+      <div><span class="text-white text-xs font-semibold">Inteligo </span><span class="text-[#00c0d0] text-xs font-bold">AlertApp</span></div>
+    </div>
+    <nav class="flex-1 py-3 px-2 space-y-0.5">
+      ${items.map(i=>`
+        <a onclick="nav('${i.v}');return false;" href="?view=${i.v}"
+          class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all cursor-pointer ${current===i.v?'bg-[#0041a3] text-white font-semibold':'text-white/70 hover:text-white hover:bg-white/10'}">
+          <span>${i.icon}</span><span>${i.label}</span>
+        </a>`).join('')}
+    </nav>
+    <div class="p-3 border-t border-white/10">
+      <div class="text-white/60 text-xs px-1 mb-0.5 truncate">${currentUser?.email||''}</div>
+      <div class="text-white/40 text-[10px] px-1 mb-2 capitalize">${role}</div>
+      <button onclick="doLogout()" class="w-full text-left text-white/60 hover:text-white text-xs px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">Cerrar sesión</button>
+    </div>
+  </aside>`;
+}
+
+function withSidebar(view, content) {
+  return `<div class="flex min-h-screen">${sidebar(view)}<main class="flex-1 overflow-auto ml-52">${content}</main></div>`;
+}
+
+// ══════════════════════════════════════════════════════════
+//  LOGIN
+// ══════════════════════════════════════════════════════════
+function renderLogin() {
+  document.getElementById('app').innerHTML = `
+  <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-slate-100 p-4">
+    <div class="bg-white rounded-2xl p-8 w-full max-w-sm shadow-sm border border-slate-100">
+      <div class="flex justify-center mb-6">
+        <div class="bg-[#00164f] rounded-xl px-4 py-3 flex items-center gap-3">
+          ${LOGO_W}
+          <div class="text-white text-xs font-bold leading-tight">INTELIGO<br>GROUP</div>
+        </div>
+      </div>
+      <h1 class="text-xl font-bold text-[#00164f] text-center mb-1">Inteligo <span class="text-[#00c0d0]">AlertApp</span></h1>
+      <p class="text-sm text-slate-400 text-center mb-6">Sistema de Alertas de Salas</p>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Usuario</label>
+          <input id="lEmail" type="email" placeholder="usuario@inteligogroup.com"
+            class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0041a3]">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Contraseña</label>
+          <input id="lPass" type="password" placeholder="••••••••"
+            class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0041a3]"
+            onkeydown="if(event.key==='Enter')doLogin()">
+        </div>
+        <div id="lErr" class="hidden text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2"></div>
+        <button onclick="doLogin()" class="w-full bg-[#0041a3] text-white font-semibold py-3 rounded-lg text-sm hover:bg-blue-800 transition-colors">
+          Ingresar al sistema
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+window.doLogin = async function() {
+  const email = document.getElementById('lEmail').value.trim();
+  const pass  = document.getElementById('lPass').value;
+  const err   = document.getElementById('lErr');
+  err.classList.add('hidden');
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+    navigate('panel');
+  } catch(e) {
+    err.textContent = 'Credenciales incorrectas. Verifica tu usuario y contraseña.';
+    err.classList.remove('hidden');
+  }
+};
+
+window.doLogout = async function() {
+  await signOut(auth);
+  navigate('login');
+};
+
+// ══════════════════════════════════════════════════════════
+//  VISTA SALA — CLIENTES
+// ══════════════════════════════════════════════════════════
+function getRoomBySlug(slug) {
+  return rooms.find(r => r.urlSlug===slug || r.id===slug || r.id==='sala-'+slug) || null;
+}
+
+function renderSala(slug) {
+  const room = getRoomBySlug(slug);
+  if (!room) {
+    document.getElementById('app').innerHTML = `
+      <div class="min-h-screen bg-gradient-to-br from-[#00164f] via-[#0041a3] to-[#5785e1] flex items-center justify-center">
+        <p class="text-white/60 text-sm">Cargando sala...</p>
+      </div>`;
+    return;
+  }
+
+  const isDir  = room.type === 'directorio';
+  const cats   = categories.filter(c => isDir ? c.directorioVisible : true);
+  const high   = cats.filter(c=>c.priority==='high');
+  const medium = cats.filter(c=>c.priority==='medium');
+  const low    = cats.filter(c=>c.priority==='low');
+
+  const bl = {high:'border-l-[3px] border-l-[#ff6751]', medium:'border-l-[3px] border-l-[#ffbc54]', low:'border-l-[3px] border-l-[#00c0d0]'};
+
+  function btn(cat, label, icon, itemId) {
+    return `<button onclick="sendReq('${room.id}','${room.name.replace(/'/g,"\\'")}','${room.type}','${cat.id}','${cat.name.replace(/'/g,"\\'")}','${label.replace(/'/g,"\\'")}','${cat.priority}')"
+      class="bg-white/[0.13] border border-white/[0.22] ${bl[cat.priority]} rounded-xl p-2.5 flex flex-col items-center gap-1 min-h-[66px] transition-all hover:bg-white cursor-pointer group">
+      <span class="text-[20px] leading-none">${icon}</span>
+      <span class="text-[11px] font-semibold text-white group-hover:text-slate-800 text-center leading-tight transition-colors">${label}</span>
+      ${cat.note?`<span class="text-[9px] text-white/55 group-hover:text-slate-400">(${cat.note})</span>`:''}
+      ${cat.onlyDays?`<span class="text-[9px] text-white/55 group-hover:text-slate-400">(${cat.onlyDays})</span>`:''}
+    </button>`;
+  }
+
+  function catGroup(cat) {
+    const isExpandable = !isDir && cat.subitems && cat.subitems.length > 1 && cat.id !== 'bocaditos';
+    if (!isExpandable) {
+      return btn(cat, cat.name, cat.icon, 'direct');
+    }
+    const isOpen = openSub === cat.id;
+    return `
+      <button onclick="toggleSub('${cat.id}')"
+        class="${isOpen?'bg-[#00c0d0]/[0.35] border-[#00c0d0]':'bg-[#00c0d0]/[0.18] border-[#00c0d0]/[0.45]'} border rounded-xl p-2.5 flex flex-col items-center gap-1 min-h-[66px] transition-all hover:bg-white cursor-pointer group">
+        <span class="text-[20px]">${cat.icon}</span>
+        <span class="text-[11px] font-semibold text-white group-hover:text-slate-800 text-center leading-tight transition-colors">${cat.name}</span>
+        ${cat.onlyDays?`<span class="text-[9px] text-white/55 group-hover:text-slate-400">(${cat.onlyDays})</span>`:''}
+        <span class="text-[9px] text-white/60 group-hover:text-slate-400">${isOpen?'▲':'▼'}</span>
+      </button>
+      ${isOpen?`
+        <div class="col-span-full mt-1 animate-fadeIn">
+          <div class="bg-white/[0.08] border border-white/[0.18] rounded-xl p-2.5">
+            <p class="text-[9px] text-white/60 font-bold uppercase tracking-wider mb-2">${cat.name}${cat.onlyDays?' — '+cat.onlyDays:''}</p>
+            <div class="grid grid-cols-4 gap-1.5">
+              ${(cat.subitems||[]).map(item=>`
+                <button onclick="sendReq('${room.id}','${room.name.replace(/'/g,"\\'")}','${room.type}','${cat.id}','${cat.name.replace(/'/g,"\\'")}','${item.name.replace(/'/g,"\\'")}','${cat.priority}')"
+                  class="bg-white/[0.12] border border-white/[0.2] rounded-lg p-2 flex flex-col items-center gap-1 hover:bg-white cursor-pointer group transition-all">
+                  <span class="text-base">${item.icon}</span>
+                  <span class="text-[10px] font-semibold text-white group-hover:text-slate-800 text-center leading-tight transition-colors">${item.name}</span>
+                </button>`).join('')}
+            </div>
+          </div>
+        </div>`:''}`;
+  }
+
+  function section(title, dotCls, items, cols) {
+    if (!items.length) return '';
+    return `
+      <div class="mb-2.5">
+        <div class="flex items-center gap-2 mb-1.5">
+          <div class="w-2 h-2 rounded-full ${dotCls}"></div>
+          <span class="text-[10px] font-bold text-white uppercase tracking-widest">${title}</span>
+        </div>
+        <div class="grid ${cols} gap-1.5">${items.map(catGroup).join('')}</div>
+      </div>`;
+  }
+
+  document.getElementById('app').innerHTML = `
+  <div class="min-h-screen bg-gradient-to-br from-[#00164f] via-[#0041a3] to-[#5785e1] flex flex-col items-center">
+    <div class="w-full max-w-3xl px-4 py-4 flex flex-col gap-2.5">
+      <div class="flex items-center justify-center gap-3">
+        ${LOGO_W}
+        <div class="w-px h-7 bg-white/30"></div>
+        <div class="text-white text-sm font-bold leading-tight tracking-wide">INTELIGO<br>GROUP</div>
+      </div>
+      <div class="text-center">
+        <span class="inline-block bg-white/15 border border-white/30 text-white text-xs font-medium px-4 py-1 rounded-full mb-1">
+          ${isDir?'Directorio':'Sala de Reuniones'}
+        </span>
+        <h1 class="text-white text-2xl font-bold">${room.name}</h1>
+        <p class="text-white/60 text-xs">Seleccione el tipo de atención que necesita</p>
+      </div>
+      <div class="bg-[#00c0d0]/15 border border-[#00c0d0]/40 rounded-xl px-4 py-2.5 flex items-center gap-3">
+        <span class="text-xl">📶</span>
+        <div>
+          <p class="text-white text-xs font-bold uppercase tracking-wide mb-0.5">Wi-Fi disponible para clientes</p>
+          <div class="flex gap-4 flex-wrap">
+            <span class="text-white/80 text-xs">Red: <strong class="text-white">${wifi.ssid||''}</strong></span>
+            <span class="text-white/80 text-xs">Usuario: <strong class="text-white">${wifi.user||''}</strong></span>
+            <span class="text-white/80 text-xs">Clave: <strong class="text-white">${wifi.password||''}</strong></span>
+          </div>
+        </div>
+      </div>
+      ${section('Soporte Técnico — Prioridad Alta','bg-[#ff6751]',high,'grid-cols-4')}
+      ${section('Asistencia — Prioridad Media','bg-[#ffbc54]',medium,'grid-cols-3')}
+      ${section(isDir?'Bebidas — Prioridad Baja':'Bebidas y Alimentos — Toque una categoría para desplegar','bg-[#00c0d0]',low,isDir?'grid-cols-3':'grid-cols-5')}
+    </div>
+  </div>
+  <div id="confirmOverlay" class="hidden fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-[#00164f]/97 to-[#0041a3]/97 p-8 text-center">
+    <div class="w-20 h-20 rounded-full bg-[#00c0d0]/90 flex items-center justify-center text-white text-3xl mb-6 bounce-in">✓</div>
+    <h2 class="text-white text-2xl font-bold mb-3">Gracias por su preferencia</h2>
+    <p class="text-white/80 text-sm leading-loose max-w-xs mb-4">
+      En breve un mozo se estará acercando<br>para su atención.<br><br>
+      Puede continuar con su reunión<br>con total tranquilidad.
+    </p>
+    <span id="confirmTag" class="inline-block bg-white/12 border border-white/20 text-white/75 text-xs px-4 py-1.5 rounded-full mb-8"></span>
+    <button onclick="document.getElementById('confirmOverlay').classList.add('hidden')"
+      class="bg-white/15 border border-white/30 text-white text-sm font-medium px-7 py-2.5 rounded-lg hover:bg-white/25 transition-colors">
+      Cerrar
+    </button>
+  </div>`;
+}
+
+window.toggleSub = function(id) {
+  openSub = openSub===id ? null : id;
+  const slug = new URLSearchParams(window.location.search).get('sala');
+  renderSala(slug);
+};
+
+window.sendReq = async function(roomId, roomName, roomType, catId, catName, itemName, priority) {
+  await addDoc(collection(db,'alerts'), {
+    roomId, roomName, roomType, categoryId:catId, categoryName:catName, itemName, priority,
+    status:'pending', createdAt: serverTimestamp()
+  });
+  playBeep();
+  openSub = null;
+  document.getElementById('confirmTag').textContent = `${roomName}  ·  ${itemName}`;
+  document.getElementById('confirmOverlay').classList.remove('hidden');
+};
+
+// ══════════════════════════════════════════════════════════
+//  PANEL OPERATIVO
+// ══════════════════════════════════════════════════════════
+const sLabel = {pending:'Pendiente',attending:'En Atención',attended:'Atendida'};
+const sStyle = {pending:'bg-orange-50 text-orange-700',attending:'bg-blue-50 text-blue-700',attended:'bg-green-50 text-green-700'};
+const pLabel = {high:'Alta',medium:'Media',low:'Baja'};
+const pStyle = {high:'bg-red-50 text-[#ff6751]',medium:'bg-yellow-50 text-yellow-700',low:'bg-teal-50 text-teal-700'};
+const bLeft  = {high:'border-l-4 border-l-[#ff6751]',medium:'border-l-4 border-l-[#ffbc54]',low:'border-l-4 border-l-[#00c0d0]'};
+
+function renderPanel() {
+  const pend = alerts.filter(a=>a.status==='pending').length;
+  const att  = alerts.filter(a=>a.status==='attending').length;
+  const done = alerts.filter(a=>a.status==='attended').length;
+  const high = alerts.filter(a=>a.priority==='high'&&a.status==='pending').length;
+
+  let data = panelFilter==='all' ? alerts : alerts.filter(a=>a.status===panelFilter);
+  data = [...data].sort((a,b)=>{
+    const po={high:0,medium:1,low:2}, so={pending:0,attending:1,attended:2};
+    if(so[a.status]!==so[b.status]) return so[a.status]-so[b.status];
+    return po[a.priority]-po[b.priority];
+  });
+
+  const fBtn = (v,l,c) => `<button onclick="setPFilter('${v}')" class="text-xs font-medium px-4 py-1.5 rounded-full border transition-colors ${panelFilter===v?'bg-[#0041a3] border-[#0041a3] text-white':'bg-white border-slate-200 text-slate-500 hover:border-[#0041a3] hover:text-[#0041a3]'}">${l} (${c})</button>`;
+
+  const cards = data.length===0
+    ? `<div class="col-span-full text-center py-16 text-slate-300"><div class="text-5xl mb-3">✓</div><p class="text-sm">No hay solicitudes activas</p></div>`
+    : data.map(a=>{
+        const isNew = a.status==='pending' && Date.now()-a.createdAt.getTime()<15000;
+        return `
+        <div class="bg-white rounded-xl border border-slate-100 ${bLeft[a.priority]} p-4 relative hover:shadow-md transition-all">
+          ${isNew?'<span class="absolute top-3 right-3 w-2 h-2 bg-[#ff6751] rounded-full pulse-red"></span>':''}
+          <div class="flex justify-between items-start mb-2">
+            <span class="font-bold text-[#00164f] text-sm">${a.roomName}</span>
+            <span class="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">${fmtTime(a.createdAt)}</span>
+          </div>
+          <p class="font-semibold text-slate-800 text-sm mb-1">${a.itemName}</p>
+          <p class="text-xs text-slate-400 mb-3">${a.categoryName}</p>
+          <div class="flex items-center justify-between">
+            <div class="flex gap-1.5 flex-wrap">
+              <span class="text-[11px] font-semibold px-2 py-0.5 rounded-lg ${sStyle[a.status]}">${sLabel[a.status]}</span>
+              <span class="text-[10px] font-semibold px-2 py-0.5 rounded-lg ${pStyle[a.priority]}">${pLabel[a.priority]}</span>
+            </div>
+            <div class="flex gap-1.5">
+              ${a.status==='pending'  ?`<button onclick="setStatus('${a.id}','attending')" class="bg-[#0041a3] text-white text-[11px] font-semibold px-3 py-1 rounded-lg hover:bg-blue-800">Atender</button>`:''}
+              ${a.status==='attending'?`<button onclick="setStatus('${a.id}','attended')"  class="bg-green-50 text-green-700 border border-green-200 text-[11px] font-semibold px-3 py-1 rounded-lg hover:bg-green-100">✓ Listo</button>`:''}
+            </div>
+          </div>
+        </div>`}).join('');
+
+  document.getElementById('app').innerHTML = withSidebar('panel', `
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div>
+          <h1 class="text-xl font-bold text-[#00164f]">Panel Operativo</h1>
+          <p class="text-xs text-slate-400 mt-0.5">${new Date().toLocaleString('es-PE',{weekday:'long',hour:'2-digit',minute:'2-digit'})} · <span class="text-green-600">● En vivo</span></p>
+        </div>
+        <button onclick="clearAttended()" class="text-xs font-semibold px-3 py-1.5 bg-orange-50 border border-orange-200 text-orange-600 rounded-full hover:bg-orange-100">Limpiar atendidas</button>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        ${[['Pendientes',pend,'text-[#ff8c42]'],['En Atención',att,'text-[#0041a3]'],['Atendidas',done,'text-[#00c0d0]'],['Alta Prioridad',high,'text-[#ff6751]']].map(([l,v,c])=>`
+          <div class="bg-white rounded-xl border border-slate-100 p-4">
+            <p class="text-[11px] text-slate-400 font-medium uppercase tracking-wide mb-1">${l}</p>
+            <p class="text-3xl font-bold ${c}">${v}</p>
+          </div>`).join('')}
+      </div>
+      <div class="flex gap-2 mb-4 flex-wrap">
+        ${fBtn('all','Todas',alerts.length)}
+        ${fBtn('pending','Pendientes',pend)}
+        ${fBtn('attending','En Atención',att)}
+        ${fBtn('attended','Atendidas',done)}
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">${cards}</div>
+    </div>`);
+}
+
+window.setPFilter = v => { panelFilter=v; renderPanel(); };
+window.setStatus  = async function(id, status) {
+  const u = {status};
+  if (status==='attending') u.attendedAt  = serverTimestamp();
+  if (status==='attended')  u.completedAt = serverTimestamp();
+  await updateDoc(doc(db,'alerts',id), u);
+};
+window.clearAttended = () => {
+  alerts.filter(a=>a.status==='attended').forEach(a=>updateDoc(doc(db,'alerts',a.id),{_cleared:true}));
+};
+
+// ══════════════════════════════════════════════════════════
+//  REPORTES
+// ══════════════════════════════════════════════════════════
+function renderReportes() {
+  const cutoff = reportRange==='7d' ? 7 : reportRange==='30d' ? 30 : 9999;
+  const since  = new Date(Date.now() - cutoff*86400000);
+  let data     = alerts.filter(a=>a.createdAt>=since);
+  if (reportRoom!=='all') data = data.filter(a=>a.roomId===reportRoom);
+
+  const high = data.filter(a=>a.priority==='high').length;
+  const rate = data.length ? Math.round(data.filter(a=>a.status==='attended').length/data.length*100) : 0;
+
+  const attTimes = data.filter(a=>a.attendedAt&&a.createdAt).map(a=>(a.attendedAt.getTime()-a.createdAt.getTime())/60000);
+  const avgTime  = attTimes.length ? Math.round(attTimes.reduce((s,v)=>s+v,0)/attTimes.length) : null;
+
+  const trend = Array.from({length:7},(_,i)=>{
+    const d  = new Date(Date.now()-(6-i)*86400000);
+    const ds = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+    const day = data.filter(a=>fmtDate(a.createdAt)===ds);
+    return {label:ds, total:day.length, high:day.filter(a=>a.priority==='high').length};
+  });
+
+  // Por sala
+  const bySala = {};
+  data.forEach(a=>{bySala[a.roomName]=(bySala[a.roomName]||0)+1;});
+  const salaArr = Object.entries(bySala).sort((a,b)=>b[1]-a[1]);
+
+  // Por ítem top 10
+  const byItem = {};
+  data.forEach(a=>{byItem[a.itemName]=(byItem[a.itemName]||0)+1;});
+  const itemArr = Object.entries(byItem).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const maxItem = itemArr[0]?.[1]||1;
+
+  // Por sala detalle (para tabla)
+  const bySalaDetail = {};
+  data.forEach(a=>{
+    if(!bySalaDetail[a.roomName]) bySalaDetail[a.roomName]={total:0,pending:0,attending:0,attended:0};
+    bySalaDetail[a.roomName].total++;
+    bySalaDetail[a.roomName][a.status]++;
+  });
+
+  const rBtn = (v,l) => `<button onclick="setRRange('${v}')" class="text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${reportRange===v?'bg-[#0041a3] border-[#0041a3] text-white':'bg-white border-slate-200 text-slate-500 hover:border-[#0041a3]'}">${l}</button>`;
+  const roomOpts = rooms.map(r=>`<option value="${r.id}" ${reportRoom===r.id?'selected':''}>${r.name}</option>`).join('');
+
+  document.getElementById('app').innerHTML = withSidebar('reportes', `
+    <div class="p-6 space-y-5">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <h1 class="text-xl font-bold text-[#00164f]">Reportes y Analítica</h1>
+        <div class="flex gap-2 flex-wrap items-center">
+          ${rBtn('7d','Últimos 7 días')}${rBtn('30d','Últimos 30 días')}${rBtn('all','Todo')}
+          <select onchange="setRRoom(this.value)" class="text-xs border border-slate-200 rounded-full px-3 py-1.5 bg-white text-slate-600 focus:outline-none focus:border-[#0041a3]">
+            <option value="all">Todas las salas</option>${roomOpts}
+          </select>
+        </div>
+      </div>
+      <!-- KPIs -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        ${[['Total solicitudes',data.length,'text-[#0041a3]'],['Alta prioridad',high,'text-[#ff6751]'],['Tasa de atención',rate+'%','text-[#00c0d0]'],['Tiempo prom.',avgTime!==null?avgTime+' min':'—','text-[#ff8c42]']].map(([l,v,c])=>`
+          <div class="bg-white rounded-xl border border-slate-100 p-4">
+            <p class="text-[11px] text-slate-400 font-medium uppercase tracking-wide mb-1">${l}</p>
+            <p class="text-2xl font-bold ${c}">${v}</p>
+          </div>`).join('')}
+      </div>
+      <!-- Tendencia -->
+      <div class="bg-white rounded-xl border border-slate-100 p-5">
+        <h2 class="text-sm font-bold text-[#00164f] mb-4">Tendencia diaria</h2>
+        <canvas id="cTrend" height="80"></canvas>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- Por sala barra -->
+        <div class="bg-white rounded-xl border border-slate-100 p-5">
+          <h2 class="text-sm font-bold text-[#00164f] mb-4">Solicitudes por sala</h2>
+          ${salaArr.length?'<canvas id="cSala" height="160"></canvas>':'<p class="text-slate-300 text-sm text-center py-8">Sin datos</p>'}
+        </div>
+        <!-- Top ítems -->
+        <div class="bg-white rounded-xl border border-slate-100 p-5">
+          <h2 class="text-sm font-bold text-[#00164f] mb-4">Top solicitudes frecuentes</h2>
+          ${itemArr.length===0?'<p class="text-slate-300 text-sm text-center py-8">Sin datos</p>':
+            itemArr.map(([name,v],i)=>`
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-[10px] text-slate-400 w-4">${i+1}</span>
+                <span class="text-xs text-slate-600 w-36 truncate">${name}</span>
+                <div class="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
+                  <div class="h-full rounded-full bg-[#0041a3]" style="width:${Math.round(v/maxItem*100)}%"></div>
+                </div>
+                <span class="text-xs font-semibold text-[#0041a3] w-5 text-right">${v}</span>
+              </div>`).join('')}
+        </div>
+      </div>
+      <!-- Comportamiento por sala -->
+      <div class="bg-white rounded-xl border border-slate-100 p-5">
+        <h2 class="text-sm font-bold text-[#00164f] mb-4">Comportamiento por sala</h2>
+        ${Object.keys(bySalaDetail).length===0?'<p class="text-slate-300 text-sm text-center py-6">Sin datos</p>':`
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead><tr class="bg-slate-50">
+              <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Sala</th>
+              <th class="text-right px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Total</th>
+              <th class="text-right px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Pendientes</th>
+              <th class="text-right px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">En Atención</th>
+              <th class="text-right px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Atendidas</th>
+              <th class="text-right px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">% Atendido</th>
+            </tr></thead>
+            <tbody>
+              ${Object.entries(bySalaDetail).sort((a,b)=>b[1].total-a[1].total).map(([sala,d])=>`
+                <tr class="border-t border-slate-50 hover:bg-slate-50">
+                  <td class="px-3 py-2 font-medium text-[#00164f]">${sala}</td>
+                  <td class="px-3 py-2 text-right font-bold text-[#0041a3]">${d.total}</td>
+                  <td class="px-3 py-2 text-right text-orange-600">${d.pending}</td>
+                  <td class="px-3 py-2 text-right text-blue-600">${d.attending}</td>
+                  <td class="px-3 py-2 text-right text-green-600">${d.attended}</td>
+                  <td class="px-3 py-2 text-right font-semibold">${d.total?Math.round(d.attended/d.total*100):0}%</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
+      </div>
+      <!-- Historial -->
+      <div class="bg-white rounded-xl border border-slate-100 p-5">
+        <h2 class="text-sm font-bold text-[#00164f] mb-4">Historial detallado</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead><tr class="bg-slate-50">
+              <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Sala</th>
+              <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Solicitud</th>
+              <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Categoría</th>
+              <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Hora</th>
+              <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Estado</th>
+              <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Prioridad</th>
+            </tr></thead>
+            <tbody>
+              ${data.slice(0,50).map(a=>`
+                <tr class="border-t border-slate-50 hover:bg-slate-50">
+                  <td class="px-3 py-2 font-medium text-[#00164f]">${a.roomName}</td>
+                  <td class="px-3 py-2 text-slate-700">${a.itemName}</td>
+                  <td class="px-3 py-2 text-slate-500">${a.categoryName}</td>
+                  <td class="px-3 py-2 text-slate-400">${fmtDateTime(a.createdAt)}</td>
+                  <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-lg font-semibold ${sStyle[a.status]}">${sLabel[a.status]}</span></td>
+                  <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-lg font-semibold ${pStyle[a.priority]}">${pLabel[a.priority]}</span></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+          ${data.length>50?`<p class="text-xs text-slate-400 text-center mt-3">Mostrando 50 de ${data.length}</p>`:''}
+        </div>
+      </div>
+    </div>`);
+
+  requestAnimationFrame(() => {
+    if (chartTrend) chartTrend.destroy();
+    if (chartSala)  chartSala.destroy();
+    const c1 = document.getElementById('cTrend');
+    if (c1) chartTrend = new Chart(c1, {
+      type:'line',
+      data:{labels:trend.map(t=>t.label), datasets:[
+        {label:'Total',data:trend.map(t=>t.total),borderColor:'#0041a3',backgroundColor:'#0041a320',tension:.4,fill:true},
+        {label:'Alta', data:trend.map(t=>t.high), borderColor:'#ff6751',backgroundColor:'transparent',tension:.4},
+      ]},
+      options:{responsive:true,plugins:{legend:{labels:{font:{family:'Sora',size:11}}}},
+        scales:{x:{ticks:{font:{family:'Sora',size:10}}},y:{ticks:{font:{family:'Sora',size:10}}}}}
+    });
+    const c2 = document.getElementById('cSala');
+    if (c2 && salaArr.length) chartSala = new Chart(c2, {
+      type:'bar',
+      data:{labels:salaArr.map(([k])=>k.replace('Directorio','Dir.')), datasets:[{label:'Solicitudes',data:salaArr.map(([,v])=>v),backgroundColor:'#0041a3',borderRadius:4}]},
+      options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
+        scales:{x:{ticks:{font:{family:'Sora',size:10}}},y:{ticks:{font:{family:'Sora',size:10}}}}}
+    });
+  });
+}
+
+window.setRRange = v => { reportRange=v; renderReportes(); };
+window.setRRoom  = v => { reportRoom=v;  renderReportes(); };
+
+// ══════════════════════════════════════════════════════════
+//  ADMIN: SALAS
+// ══════════════════════════════════════════════════════════
+function renderAdminSalas() {
+  const base = window.location.href.split('?')[0];
+  document.getElementById('app').innerHTML = withSidebar('admin-salas', `
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <h1 class="text-xl font-bold text-[#00164f]">Salas y Directorios</h1>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-slate-500">URL base:</label>
+          <input id="baseUrl" value="${base}" class="text-xs border border-slate-200 rounded-lg px-3 py-1.5 w-64 focus:outline-none focus:border-[#0041a3]">
+        </div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-100 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead><tr class="bg-slate-50">
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">#</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Nombre</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Tipo</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">URL de acceso</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">QR</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Estado</th>
+          </tr></thead>
+          <tbody>
+            ${rooms.map((r,i)=>`
+              <tr class="border-t border-slate-50 hover:bg-slate-50">
+                <td class="px-4 py-3 text-slate-400 text-xs">${i+1}</td>
+                <td class="px-4 py-3 font-semibold text-[#00164f]">${r.name}</td>
+                <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded-full font-medium ${r.type==='directorio'?'bg-purple-50 text-purple-700':'bg-blue-50 text-blue-700'}">${r.type==='directorio'?'Directorio':'Sala'}</span></td>
+                <td class="px-4 py-3"><code class="text-xs bg-slate-100 px-2 py-1 rounded text-[#0041a3]">?sala=${r.urlSlug}</code></td>
+                <td class="px-4 py-3"><button onclick="showQR('${r.urlSlug}','${r.name.replace(/'/g,"\\'")}','${base}')" class="bg-[#00164f] text-white text-xs px-3 py-1.5 rounded-lg hover:bg-[#0041a3] transition-colors">🔲 Ver QR</button></td>
+                <td class="px-4 py-3"><span class="text-xs font-semibold px-3 py-1 rounded-full ${r.active?'bg-green-50 text-green-700':'bg-slate-100 text-slate-400'}">${r.active?'Activa':'Inactiva'}</span></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `);
+
+  // Modal QR (fuera del sidebar)
+  if (!document.getElementById('qrModal')) {
+    const m = document.createElement('div');
+    m.id = 'qrModal';
+    m.className = 'hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4';
+    m.innerHTML = `
+      <div class="bg-white rounded-2xl p-8 max-w-xs w-full text-center shadow-2xl">
+        <h2 id="qrTitle" class="text-lg font-bold text-[#00164f] mb-1"></h2>
+        <p id="qrUrlTxt" class="text-xs text-slate-400 mb-5 break-all"></p>
+        <img id="qrImg" class="mx-auto mb-5 w-48 h-48" src="" alt="QR">
+        <button onclick="document.getElementById('qrModal').classList.add('hidden')" class="w-full bg-[#0041a3] text-white text-sm font-semibold py-2.5 rounded-xl hover:bg-blue-800">Cerrar</button>
+      </div>`;
+    document.body.appendChild(m);
+  }
+}
+
+window.showQR = function(slug, name, base) {
+  const realBase = document.getElementById('baseUrl')?.value || base;
+  const url = `${realBase}?sala=${slug}`;
+  document.getElementById('qrTitle').textContent  = name;
+  document.getElementById('qrUrlTxt').textContent = url;
+  document.getElementById('qrImg').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}&color=00164f`;
+  document.getElementById('qrModal').classList.remove('hidden');
+};
+
+// ══════════════════════════════════════════════════════════
+//  ADMIN: WIFI
+// ══════════════════════════════════════════════════════════
+function renderAdminWifi() {
+  document.getElementById('app').innerHTML = withSidebar('admin-wifi', `
+    <div class="p-6 max-w-lg">
+      <h1 class="text-xl font-bold text-[#00164f] mb-1">Configuración Wi-Fi</h1>
+      <p class="text-xs text-slate-400 mb-6">Los cambios se reflejan en tiempo real en todas las salas.</p>
+      <div class="bg-white rounded-xl border border-slate-100 p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Nombre de red (SSID)</label>
+          <input id="wSsid" value="${wifi.ssid||''}" class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0041a3]">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Usuario</label>
+          <input id="wUser" value="${wifi.user||''}" class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0041a3]">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Contraseña</label>
+          <input id="wPass" value="${wifi.password||''}" class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0041a3]">
+          <p class="text-xs text-slate-400 mt-1">Actualiza esta clave cada mes.</p>
+        </div>
+        <button id="wBtn" onclick="saveWifi()" class="w-full bg-[#0041a3] text-white font-semibold py-2.5 rounded-xl text-sm hover:bg-blue-800 transition-colors">Guardar cambios</button>
+      </div>
+      <div class="mt-4 bg-[#00c0d0]/10 border border-[#00c0d0]/30 rounded-xl p-4">
+        <p class="text-xs font-bold text-[#00164f] uppercase tracking-wide mb-2">📶 Vista previa en salas</p>
+        <div class="flex gap-4 flex-wrap text-xs text-slate-600">
+          <span>Red: <strong>${wifi.ssid||''}</strong></span>
+          <span>Usuario: <strong>${wifi.user||''}</strong></span>
+          <span>Clave: <strong>${wifi.password||''}</strong></span>
+        </div>
+      </div>
+    </div>`);
+}
+
+window.saveWifi = async function() {
+  const ssid=document.getElementById('wSsid').value, user=document.getElementById('wUser').value, password=document.getElementById('wPass').value;
+  const btn=document.getElementById('wBtn');
+  await updateDoc(doc(db,'config','wifi'), {ssid,user,password,updatedAt:serverTimestamp()});
+  btn.textContent='✓ Guardado'; btn.classList.replace('bg-[#0041a3]','bg-green-500');
+  setTimeout(()=>{btn.textContent='Guardar cambios'; btn.classList.replace('bg-green-500','bg-[#0041a3]');},3000);
+};
+
+// ══════════════════════════════════════════════════════════
+//  ADMIN: SOLICITUDES
+// ══════════════════════════════════════════════════════════
+function renderAdminSolicitudes() {
+  const rows = categories.flatMap(cat=>
+    (cat.subitems&&cat.subitems.length>0?cat.subitems:[null]).map(item=>({cat,item}))
+  ).map(({cat,item})=>`
+    <tr class="border-t border-slate-50 hover:bg-slate-50">
+      <td class="px-4 py-2.5 text-lg">${item?.icon||cat.icon}</td>
+      <td class="px-4 py-2.5 text-slate-500 text-xs">${cat.name}</td>
+      <td class="px-4 py-2.5 font-medium text-[#00164f]">${item?.name||cat.name}</td>
+      <td class="px-4 py-2.5"><span class="text-xs font-semibold px-2 py-0.5 rounded-lg ${pStyle[cat.priority]}">${pLabel[cat.priority]}</span></td>
+      <td class="px-4 py-2.5 text-xs text-slate-400">${cat.note||cat.onlyDays||'—'}</td>
+      <td class="px-4 py-2.5">
+        ${!item?`<button onclick="toggleDirVis('${cat.id}',${!cat.directorioVisible})"
+          class="text-xs font-semibold px-3 py-1 rounded-full transition-colors ${cat.directorioVisible?'bg-green-50 text-green-700':'bg-slate-100 text-slate-400'}">
+          ${cat.directorioVisible?'✓ Sí':'No'}
+        </button>`:''}
+      </td>
+    </tr>`).join('');
+
+  document.getElementById('app').innerHTML = withSidebar('admin-solicitudes', `
+    <div class="p-6">
+      <h1 class="text-xl font-bold text-[#00164f] mb-1">Tipos de Solicitud</h1>
+      <p class="text-xs text-slate-400 mb-6">Controla qué opciones son visibles en Directorios.</p>
+      <div class="bg-white rounded-xl border border-slate-100 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead><tr class="bg-slate-50">
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Icono</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Categoría</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Solicitud</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Prioridad</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Nota</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Visible Directorio</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-4 text-xs text-blue-700">
+        💡 Para agregar o eliminar opciones edita en <strong>Firebase Console → Firestore → categories</strong>. Los cambios se reflejan al instante.
+      </div>
+    </div>`);
+}
+
+window.toggleDirVis = async (id,val) => await updateDoc(doc(db,'categories',id),{directorioVisible:val});
+
+// ══════════════════════════════════════════════════════════
+//  ADMIN: USUARIOS
+// ══════════════════════════════════════════════════════════
+function renderAdminUsuarios() {
+  if (unsubUsers) unsubUsers();
+  unsubUsers = onSnapshot(collection(db,'users'), snap => {
+    adminUsers = snap.docs.map(d=>({uid:d.id,...d.data()}));
+    renderAdminUsuariosContent();
+  });
+}
+
+function renderAdminUsuariosContent() {
+  const roleStyle = {mozo:'bg-blue-50 text-blue-700',recepcion:'bg-purple-50 text-purple-700',admin:'bg-orange-50 text-orange-700'};
+  const rows = adminUsers.map(u=>`
+    <tr class="border-t border-slate-50 hover:bg-slate-50">
+      <td class="px-4 py-3 font-medium text-[#00164f]">${u.displayName||'—'}</td>
+      <td class="px-4 py-3 text-slate-500 text-xs">${u.email}</td>
+      <td class="px-4 py-3">
+        <select onchange="changeRole('${u.uid}',this.value)" class="text-xs font-semibold px-2 py-1 rounded-lg border-0 focus:outline-none cursor-pointer ${roleStyle[u.role]||'bg-slate-50 text-slate-600'}">
+          <option value="mozo"      ${u.role==='mozo'?'selected':''}>Mozo</option>
+          <option value="recepcion" ${u.role==='recepcion'?'selected':''}>Recepción</option>
+          <option value="admin"     ${u.role==='admin'?'selected':''}>Admin</option>
+        </select>
+      </td>
+      <td class="px-4 py-3"><span class="text-xs font-semibold px-2 py-0.5 rounded-full ${u.active?'bg-green-50 text-green-700':'bg-slate-100 text-slate-400'}">${u.active?'Activo':'Inactivo'}</span></td>
+      <td class="px-4 py-3"><button onclick="toggleActive('${u.uid}',${!u.active})" class="text-xs text-slate-400 hover:text-[#0041a3] underline">${u.active?'Desactivar':'Activar'}</button></td>
+    </tr>`).join('');
+
+  document.getElementById('app').innerHTML = withSidebar('admin-usuarios', `
+    <div class="p-6">
+      <h1 class="text-xl font-bold text-[#00164f] mb-1">Usuarios del sistema</h1>
+      <p class="text-xs text-slate-400 mb-6">Para crear nuevos usuarios: Firebase Console → Authentication → Add user.</p>
+      <div class="bg-white rounded-xl border border-slate-100 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead><tr class="bg-slate-50">
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Nombre</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Email</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Rol</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Estado</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Acción</th>
+          </tr></thead>
+          <tbody>${rows||'<tr><td colspan="5" class="px-4 py-8 text-center text-slate-300 text-xs">Sin usuarios</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-4 text-xs text-blue-700 space-y-1">
+        <p><strong>Para agregar un nuevo mozo o recepcionista:</strong></p>
+        <p>1. Firebase Console → Authentication → Add user (email + contraseña)</p>
+        <p>2. Firestore → users → nuevo documento con ID = UID → campos: displayName, email, role, active:true</p>
+      </div>
+    </div>`);
+}
+
+window.changeRole   = async (uid,role)  => await updateDoc(doc(db,'users',uid),{role});
+window.toggleActive = async (uid,val)   => await updateDoc(doc(db,'users',uid),{active:val});
+
+// ══════════════════════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════════════════════
+function fmtTime(d)     { return d?d.toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}):'--:--'; }
+function fmtDate(d)     { return d?`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`:''; }
+function fmtDateTime(d) { return d?`${fmtDate(d)} ${fmtTime(d)}`:'—'; }
+
+// ══════════════════════════════════════════════════════════
+//  ARRANQUE
+// ══════════════════════════════════════════════════════════
+const urlSala = new URLSearchParams(window.location.search).get('sala');
+
+if (urlSala) {
+  // Vista pública de sala — sin login
+  await seedIfEmpty();
+  startListeners();
+  renderSala(urlSala);
+} else {
+  onAuthStateChanged(auth, async user => {
+    if (user) {
+      currentUser = user;
+      const snap  = await getDoc(doc(db,'users',user.uid));
+      currentUserRole = snap.exists() ? snap.data().role : 'recepcion';
+      await seedIfEmpty();
+      startListeners();
+    } else {
+      currentUser = null;
+      currentUserRole = null;
+    }
+    route();
+  });
+}
+</script>
+</body>
+</html>
