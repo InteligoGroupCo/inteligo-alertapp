@@ -274,9 +274,9 @@ function sidebar(current) {
   ].filter(i=>i.roles.includes(role));
 
   return `<aside class="w-52 bg-[#00164f] flex flex-col flex-shrink-0 min-h-screen fixed left-0 top-0 bottom-0 z-30">
-    <div class="px-4 py-4 flex items-center gap-2.5 border-b border-white/10">
+    <div class="px-4 py-3 flex flex-col items-center gap-1.5 border-b border-white/10">
       ${LOGO_W}
-      <div><span class="text-white text-xs font-semibold">Inteligo </span><span class="text-[#00c0d0] text-xs font-bold">AlertApp</span></div>
+      <span class="text-[#00c0d0] text-[10px] font-bold tracking-wide">AlertApp</span>
     </div>
     <nav class="flex-1 py-3 px-2 space-y-0.5">
       ${items.map(i=>`
@@ -392,8 +392,8 @@ function renderSala(slug) {
   function renderCatButtons(cat) {
     const bl = {high:'border-l-[3px] border-l-[#ff6751]', medium:'border-l-[3px] border-l-[#ffbc54]', low:'border-l-[3px] border-l-[#00c0d0]'};
 
-    // Directorio: botón directo por categoría
-    if (isDir) {
+    // Directorio bebidas: botón directo por categoría (sin submenú)
+    if (isDir && cat.priority === 'low') {
       return `<button onclick="sendReq('${room.id}','${room.name.replace(/'/g,"\\'")}','${room.type}','${cat.id}','${cat.name.replace(/'/g,"\\'")}','${cat.name.replace(/'/g,"\\'")}','${cat.priority}')"
         class="bg-white/[0.13] border border-white/[0.22] ${bl[cat.priority]} rounded-xl p-2.5 flex flex-col items-center gap-1 min-h-[66px] transition-all hover:bg-white cursor-pointer group">
         <span class="text-[20px] leading-none">${cat.icon}</span>
@@ -465,8 +465,6 @@ function renderSala(slug) {
     <div class="w-full max-w-3xl px-4 py-4 flex flex-col gap-2.5">
       <div class="flex items-center justify-center gap-3">
         ${LOGO_W}
-        <div class="w-px h-7 bg-white/30"></div>
-        <div class="text-white text-sm font-bold leading-tight tracking-wide">INTELIGO<br>GROUP</div>
       </div>
       <div class="text-center">
         <span class="inline-block bg-white/15 border border-white/30 text-white text-xs font-medium px-4 py-1 rounded-full mb-1">
