@@ -387,11 +387,41 @@ function renderSala(slug) {
     </button>`;
   }
 
-  function catGroup(cat) {
-    const isExpandable = !isDir && cat.subitems && cat.subitems.length > 1 && cat.id !== 'bocaditos';
-    if (!isExpandable) {
-      return btn(cat, cat.name, cat.icon, 'direct');
+  // Para Directorios: botón directo por categoría (Café, Infusión, Agua)
+  // Para Salas: soporte y asistencia muestran subitems directos; bebidas son expandibles
+  function renderCatButtons(cat) {
+    const bl = {high:'border-l-[3px] border-l-[#ff6751]', medium:'border-l-[3px] border-l-[#ffbc54]', low:'border-l-[3px] border-l-[#00c0d0]'};
+
+    // Directorio: botón directo por categoría
+    if (isDir) {
+      return `<button onclick="sendReq('${room.id}','${room.name.replace(/'/g,"\\'")}','${room.type}','${cat.id}','${cat.name.replace(/'/g,"\\'")}','${cat.name.replace(/'/g,"\\'")}','${cat.priority}')"
+        class="bg-white/[0.13] border border-white/[0.22] ${bl[cat.priority]} rounded-xl p-2.5 flex flex-col items-center gap-1 min-h-[66px] transition-all hover:bg-white cursor-pointer group">
+        <span class="text-[20px] leading-none">${cat.icon}</span>
+        <span class="text-[11px] font-semibold text-white group-hover:text-slate-800 text-center leading-tight transition-colors">${cat.name}</span>
+      </button>`;
     }
+
+    // Bocaditos: botón directo sin submenú
+    if (cat.id === 'bocaditos') {
+      return `<button onclick="sendReq('${room.id}','${room.name.replace(/'/g,"\\'")}','${room.type}','${cat.id}','${cat.name.replace(/'/g,"\\'")}','Bocaditos','${cat.priority}')"
+        class="bg-white/[0.13] border border-white/[0.22] ${bl[cat.priority]} rounded-xl p-2.5 flex flex-col items-center gap-1 min-h-[66px] transition-all hover:bg-white cursor-pointer group">
+        <span class="text-[20px] leading-none">${cat.icon}</span>
+        <span class="text-[11px] font-semibold text-white group-hover:text-slate-800 text-center leading-tight transition-colors">${cat.name}</span>
+        ${cat.note?`<span class="text-[9px] text-white/55 group-hover:text-slate-400">(${cat.note})</span>`:''}
+      </button>`;
+    }
+
+    // Soporte y Asistencia: mostrar cada subitem como botón individual
+    if (cat.priority === 'high' || cat.priority === 'medium') {
+      return (cat.subitems||[]).map(item=>`
+        <button onclick="sendReq('${room.id}','${room.name.replace(/'/g,"\\'")}','${room.type}','${cat.id}','${cat.name.replace(/'/g,"\\'")}','${item.name.replace(/'/g,"\\'")}','${cat.priority}')"
+          class="bg-white/[0.13] border border-white/[0.22] ${bl[cat.priority]} rounded-xl p-2.5 flex flex-col items-center gap-1 min-h-[66px] transition-all hover:bg-white cursor-pointer group">
+          <span class="text-[20px] leading-none">${item.icon}</span>
+          <span class="text-[11px] font-semibold text-white group-hover:text-slate-800 text-center leading-tight transition-colors">${item.name}</span>
+        </button>`).join('');
+    }
+
+    // Bebidas: botón expandible con submenú
     const isOpen = openSub === cat.id;
     return `
       <button onclick="toggleSub('${cat.id}')"
@@ -419,13 +449,14 @@ function renderSala(slug) {
 
   function section(title, dotCls, items, cols) {
     if (!items.length) return '';
+    const buttons = items.map(renderCatButtons).join('');
     return `
       <div class="mb-2.5">
         <div class="flex items-center gap-2 mb-1.5">
           <div class="w-2 h-2 rounded-full ${dotCls}"></div>
           <span class="text-[10px] font-bold text-white uppercase tracking-widest">${title}</span>
         </div>
-        <div class="grid ${cols} gap-1.5">${items.map(catGroup).join('')}</div>
+        <div class="grid ${cols} gap-1.5">${buttons}</div>
       </div>`;
   }
 
@@ -455,8 +486,8 @@ function renderSala(slug) {
           </div>
         </div>
       </div>
-      ${section('Soporte Técnico — Prioridad Alta','bg-[#ff6751]',high,'grid-cols-4')}
-      ${section('Asistencia — Prioridad Media','bg-[#ffbc54]',medium,'grid-cols-3')}
+      ${section('Soporte Técnico — Prioridad Alta','bg-[#ff6751]',high, isDir?'grid-cols-4':'grid-cols-4')}
+      ${section('Asistencia — Prioridad Media','bg-[#ffbc54]',medium, isDir?'grid-cols-3':'grid-cols-3')}
       ${section(isDir?'Bebidas — Prioridad Baja':'Bebidas y Alimentos — Toque una categoría para desplegar','bg-[#00c0d0]',low,isDir?'grid-cols-3':'grid-cols-5')}
     </div>
   </div>
