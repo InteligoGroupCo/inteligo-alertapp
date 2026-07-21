@@ -145,6 +145,8 @@ let reportRoom      = 'all';
 let adminUsers      = [];
 let unsubAlerts     = null;
 let unsubUsers      = null;
+let blockedCats     = {};   // {catId: true/false} — leído de Firestore config/blocked
+let bocaditoCount   = 0;    // solicitudes de bocaditos hoy en todas las salas
 
 // ══════════════════════════════════════════════════════════
 //  SEED FIRESTORE
@@ -200,11 +202,25 @@ function startListeners() {
         };
       });
       if (alerts.length > prev && prev > 0) playBeep();
+      // Contar bocaditos de hoy
+      const hoy = new Date(); hoy.setHours(0,0,0,0);
+      bocaditoCount = alerts.filter(a =>
+        a.categoryId === 'bocaditos' && a.createdAt >= hoy
+      ).length;
       const v = getView();
       if (v==='panel') renderPanel();
       if (v==='reportes') renderReportes();
+      if (v.startsWith('sala-')) renderSala(new URLSearchParams(window.location.search).get('sala'));
     }
   );
+
+  // Listener de categorías bloqueadas
+  onSnapshot(doc(db,'config','blocked'), snap => {
+    blockedCats = snap.exists() ? snap.data() : {};
+    const v = getView();
+    if (v.startsWith('sala-')) renderSala(new URLSearchParams(window.location.search).get('sala'));
+    if (v === 'admin-solicitudes') renderAdminSolicitudes();
+  });
 }
 
 // ══════════════════════════════════════════════════════════
@@ -392,6 +408,16 @@ function renderSala(slug) {
   function renderCatButtons(cat) {
     const bl = {high:'border-l-[3px] border-l-[#ff6751]', medium:'border-l-[3px] border-l-[#ffbc54]', low:'border-l-[3px] border-l-[#00c0d0]'};
 
+    // Categoría bloqueada manualmente por admin
+    if (blockedCats[cat.id]) {
+      return `<button disabled
+        class="bg-white/[0.06] border border-white/[0.1] ${bl[cat.priority]} rounded-xl p-2.5 flex flex-col items-center gap-1 min-h-[66px] opacity-50 cursor-not-allowed">
+        <span class="text-[20px] leading-none">🚫</span>
+        <span class="text-[11px] font-semibold text-white/60 text-center leading-tight">${cat.name}</span>
+        <span class="text-[9px] text-white/40">No disponible</span>
+      </button>`;
+    }
+
     // Directorio bebidas: botón directo por categoría (sin submenú)
     if (isDir && cat.priority === 'low') {
       return `<button onclick="sendReq('${room.id}','${room.name.replace(/'/g,"\\'")}','${room.type}','${cat.id}','${cat.name.replace(/'/g,"\\'")}','${cat.name.replace(/'/g,"\\'")}','${cat.priority}')"
@@ -401,13 +427,24 @@ function renderSala(slug) {
       </button>`;
     }
 
-    // Bocaditos: botón directo sin submenú
+    // Bocaditos: botón directo — bloqueado si llegó a 25 solicitudes del día
     if (cat.id === 'bocaditos') {
+      const agotado = bocaditoCount >= 25;
+      if (agotado) {
+        return `<button disabled
+          class="bg-white/[0.06] border border-white/[0.1] ${bl[cat.priority]} rounded-xl p-2.5 flex flex-col items-center gap-1 min-h-[66px] opacity-50 cursor-not-allowed">
+          <span class="text-[20px] leading-none">🚫</span>
+          <span class="text-[11px] font-semibold text-white/60 text-center leading-tight">${cat.name}</span>
+          <span class="text-[9px] text-white/40">Agotado por hoy</span>
+        </button>`;
+      }
+      const restantes = 25 - bocaditoCount;
       return `<button onclick="sendReq('${room.id}','${room.name.replace(/'/g,"\\'")}','${room.type}','${cat.id}','${cat.name.replace(/'/g,"\\'")}','Bocaditos','${cat.priority}')"
         class="bg-white/[0.13] border border-white/[0.22] ${bl[cat.priority]} rounded-xl p-2.5 flex flex-col items-center gap-1 min-h-[66px] transition-all hover:bg-white cursor-pointer group">
         <span class="text-[20px] leading-none">${cat.icon}</span>
         <span class="text-[11px] font-semibold text-white group-hover:text-slate-800 text-center leading-tight transition-colors">${cat.name}</span>
         ${cat.note?`<span class="text-[9px] text-white/55 group-hover:text-slate-400">(${cat.note})</span>`:''}
+        <span class="text-[9px] text-[#00c0d0] group-hover:text-teal-600">${restantes} disponibles</span>
       </button>`;
     }
 
@@ -909,6 +946,13 @@ function renderAdminSolicitudes() {
           ${cat.directorioVisible?'✓ Sí':'No'}
         </button>`:''}
       </td>
+      <td class="px-4 py-2.5">
+        ${!item?`<button onclick="toggleBlock('${cat.id}')"
+          class="text-xs font-semibold px-3 py-1 rounded-full transition-colors ${blockedCats[cat.id]?'bg-red-100 text-red-700':'bg-slate-100 text-slate-500'}">
+          ${blockedCats[cat.id]?'🚫 Bloqueado':'Bloquear'}
+        </button>`:''}
+        ${cat.id==='bocaditos'?`<span class="text-xs text-slate-400 ml-1">(${bocaditoCount}/25 hoy)</span>`:''}
+      </td>
     </tr>`).join('');
 
   document.getElementById('app').innerHTML = withSidebar('admin-solicitudes', `
@@ -924,6 +968,7 @@ function renderAdminSolicitudes() {
             <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Prioridad</th>
             <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Nota</th>
             <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Visible Directorio</th>
+            <th class="text-left px-4 py-3 text-slate-500 font-semibold text-xs uppercase tracking-wide">Bloquear en Salas</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -935,6 +980,17 @@ function renderAdminSolicitudes() {
 }
 
 window.toggleDirVis = async (id,val) => await updateDoc(doc(db,'categories',id),{directorioVisible:val});
+window.toggleBlock = async function(catId) {
+  const newVal = !blockedCats[catId];
+  const updates = {};
+  updates[catId] = newVal;
+  try {
+    await updateDoc(doc(db,'config','blocked'), updates);
+  } catch(e) {
+    // Si el documento no existe, lo crea
+    await setDoc(doc(db,'config','blocked'), {...blockedCats, [catId]: newVal});
+  }
+};
 
 // ══════════════════════════════════════════════════════════
 //  ADMIN: USUARIOS
