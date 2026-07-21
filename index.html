@@ -148,6 +148,7 @@ let reportRoom      = 'all';
 let adminUsers      = [];
 let unsubAlerts     = null;
 let unsubUsers      = null;
+let selectedAlerts  = new Set();  // IDs de alertas seleccionadas para eliminar
 let blockedCats     = {};   // {catId: true/false} — leído de Firestore config/blocked
 let bocaditoCount   = 0;    // solicitudes de bocaditos hoy en todas las salas
 
@@ -196,7 +197,9 @@ function startListeners() {
     query(collection(db,'alerts'), orderBy('createdAt','desc')),
     snap => {
       const prev = alerts.length;
-      alerts = snap.docs.map(d => {
+      alerts = snap.docs
+        .filter(d => !d.data()._deleted)
+        .map(d => {
         const data = d.data();
         return {...data, id:d.id,
           createdAt:  data.createdAt  instanceof Timestamp ? data.createdAt.toDate()  : new Date(),
@@ -622,7 +625,7 @@ function renderPanel() {
           <h1 class="text-xl font-bold text-[#00164f]">Panel Operativo</h1>
           <p class="text-xs text-slate-400 mt-0.5">${new Date().toLocaleString('es-PE',{weekday:'long',hour:'2-digit',minute:'2-digit'})} · <span class="text-green-600">● En vivo</span></p>
         </div>
-        <button onclick="clearAttended()" class="text-xs font-semibold px-3 py-1.5 bg-orange-50 border border-orange-200 text-orange-600 rounded-full hover:bg-orange-100">Limpiar atendidas</button>
+        ${currentUserRole==='admin'?`<button onclick="clearAttended()" class="text-xs font-semibold px-3 py-1.5 bg-orange-50 border border-orange-200 text-orange-600 rounded-full hover:bg-orange-100">Limpiar atendidas</button>`:''}
       <button onclick="toggleQuickBlock()" class="text-xs font-semibold px-3 py-1.5 bg-slate-100 border border-slate-200 text-slate-600 rounded-full hover:bg-slate-200">🍹 Cócteles: <span id="quickBlockStatus">...</span></button>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
@@ -639,7 +642,14 @@ function renderPanel() {
         ${fBtn('attended','Atendidas',done)}
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">${cards}</div>
-    </div>`);
+    </div>
+    ${currentUserRole==='admin' && selectedAlerts.size>0 ? `
+    <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-white border border-red-200 rounded-2xl shadow-xl px-5 py-3">
+      <span class="text-sm font-semibold text-red-700">${selectedAlerts.size} solicitud${selectedAlerts.size>1?'es':''} seleccionada${selectedAlerts.size>1?'s':''}</span>
+      <button onclick="deleteSelectedAlerts()" class="bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-red-700 transition-colors">🗑️ Eliminar seleccionadas</button>
+      <button onclick="clearSelection()" class="text-xs text-slate-400 hover:text-slate-600">Cancelar</button>
+    </div>` : ''}
+    `);
   requestAnimationFrame(updateQuickBlockBtn);
 }
 
@@ -663,6 +673,30 @@ function updateQuickBlockBtn() {
     btn.className = blocked ? 'text-red-600 font-bold' : 'text-green-600 font-bold';
   }
 }
+
+window.toggleSelectAlert = function(id) {
+  if (selectedAlerts.has(id)) selectedAlerts.delete(id);
+  else selectedAlerts.add(id);
+  renderPanel();
+};
+
+window.clearSelection = function() {
+  selectedAlerts.clear();
+  renderPanel();
+};
+
+window.deleteSelectedAlerts = async function() {
+  if (selectedAlerts.size === 0) return;
+  if (!confirm(`¿Eliminar ${selectedAlerts.size} solicitud${selectedAlerts.size>1?'es':''} del historial? Esta acción no se puede deshacer.`)) return;
+  const ids = [...selectedAlerts];
+  for (const id of ids) {
+    try {
+      await updateDoc(doc(db,'alerts',id), { _deleted: true, deletedAt: serverTimestamp() });
+    } catch(e) { console.warn('Error deleting', id, e); }
+  }
+  selectedAlerts.clear();
+  renderPanel();
+};
 
 window.clearAttended = () => {
   alerts.filter(a=>a.status==='attended').forEach(a=>updateDoc(doc(db,'alerts',a.id),{_cleared:true}));
@@ -726,8 +760,18 @@ function renderReportes() {
         </div>
       </div>
       <!-- KPIs -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        ${[['Total solicitudes',data.length,'text-[#0041a3]'],['Alta prioridad',high,'text-[#ff6751]'],['Tasa de atención',rate+'%','text-[#00c0d0]'],['Tiempo prom.',avgTime!==null?avgTime+' min':'—','text-[#ff8c42]']].map(([l,v,c])=>`
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        ${(()=>{
+          const attTimes2 = data.filter(a=>a.completedAt&&a.createdAt).map(a=>(a.completedAt.getTime()-a.createdAt.getTime())/60000);
+          const avgTotal = attTimes2.length ? Math.round(attTimes2.reduce((s,v)=>s+v,0)/attTimes2.length) : null;
+          return [
+            ['Total solicitudes',data.length,'text-[#0041a3]'],
+            ['Alta prioridad',high,'text-[#ff6751]'],
+            ['Tasa de atención',rate+'%','text-[#00c0d0]'],
+            ['T° Respuesta prom.',avgTime!==null?avgTime+' min':'—','text-[#ff8c42]'],
+            ['T° Total prom.',avgTotal!==null?avgTotal+' min':'—','text-[#5785e1]'],
+          ];
+        })().map(([l,v,c])=>`
           <div class="bg-white rounded-xl border border-slate-100 p-4">
             <p class="text-[11px] text-slate-400 font-medium uppercase tracking-wide mb-1">${l}</p>
             <p class="text-2xl font-bold ${c}">${v}</p>
@@ -799,6 +843,8 @@ function renderReportes() {
               <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Hora</th>
               <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Estado</th>
               <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">Prioridad</th>
+              <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">⏱ T° Respuesta</th>
+              <th class="text-left px-3 py-2 text-slate-500 font-semibold uppercase tracking-wide">⏱ T° Atención</th>
             </tr></thead>
             <tbody>
               ${data.slice(0,50).map(a=>`
@@ -809,6 +855,8 @@ function renderReportes() {
                   <td class="px-3 py-2 text-slate-400">${fmtDateTime(a.createdAt)}</td>
                   <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-lg font-semibold ${sStyle[a.status]}">${sLabel[a.status]}</span></td>
                   <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-lg font-semibold ${pStyle[a.priority]}">${pLabel[a.priority]}</span></td>
+                  <td class="px-3 py-2 text-slate-500">${a.attendedAt && a.createdAt ? fmtMinutes(a.attendedAt.getTime()-a.createdAt.getTime()) : '—'}</td>
+                  <td class="px-3 py-2 text-slate-500">${a.completedAt && a.attendedAt ? fmtMinutes(a.completedAt.getTime()-a.attendedAt.getTime()) : a.completedAt && a.createdAt ? fmtMinutes(a.completedAt.getTime()-a.createdAt.getTime()) : '—'}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -1081,13 +1129,17 @@ window.exportExcel = function() {
   if (reportRoom!=='all') data = data.filter(a=>a.roomId===reportRoom);
 
   const rows = data.map(a => ({
-    'Sala':       a.roomName,
-    'Solicitud':  a.itemName,
-    'Categoría':  a.categoryName,
-    'Fecha':      fmtDate(a.createdAt),
-    'Hora':       fmtTime(a.createdAt),
-    'Estado':     {pending:'Pendiente',attending:'En Atención',attended:'Atendida'}[a.status],
-    'Prioridad':  {high:'Alta',medium:'Media',low:'Baja'}[a.priority],
+    'Sala':             a.roomName,
+    'Solicitud':        a.itemName,
+    'Categoría':        a.categoryName,
+    'Fecha':            fmtDate(a.createdAt),
+    'Hora Solicitud':   fmtTime(a.createdAt),
+    'Hora Atención':    a.attendedAt  ? fmtTime(a.attendedAt)  : '—',
+    'Hora Completado':  a.completedAt ? fmtTime(a.completedAt) : '—',
+    'T° Respuesta':     a.attendedAt  && a.createdAt  ? fmtMinutes(a.attendedAt.getTime()-a.createdAt.getTime())   : '—',
+    'T° Atención':      a.completedAt && a.attendedAt ? fmtMinutes(a.completedAt.getTime()-a.attendedAt.getTime()) : '—',
+    'Estado':           {pending:'Pendiente',attending:'En Atención',attended:'Atendida'}[a.status],
+    'Prioridad':        {high:'Alta',medium:'Media',low:'Baja'}[a.priority],
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -1200,6 +1252,12 @@ window.exportPDF = function() {
 //  HELPERS
 // ══════════════════════════════════════════════════════════
 function fmtTime(d)     { return d?d.toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}):'--:--'; }
+function fmtMinutes(ms) {
+  if (!ms || ms < 0) return '—';
+  const m = Math.round(ms/60000);
+  if (m < 60) return m + ' min';
+  return Math.floor(m/60) + 'h ' + (m%60) + 'min';
+}
 function fmtDate(d)     { return d?`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`:''; }
 function fmtDateTime(d) { return d?`${fmtDate(d)} ${fmtTime(d)}`:'—'; }
 
