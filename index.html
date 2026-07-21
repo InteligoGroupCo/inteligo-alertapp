@@ -6,6 +6,9 @@
 <title>Inteligo AlertApp</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 tailwind.config = {
@@ -593,7 +596,10 @@ function renderPanel() {
           ${isNew?'<span class="absolute top-3 right-3 w-2 h-2 bg-[#ff6751] rounded-full pulse-red"></span>':''}
           <div class="flex justify-between items-start mb-2">
             <span class="font-bold text-[#00164f] text-sm">${a.roomName}</span>
-            <span class="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">${fmtTime(a.createdAt)}</span>
+            <div class="text-right">
+              <div class="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">${fmtTime(a.createdAt)}</div>
+              <div class="text-[10px] text-slate-300 mt-0.5">${fmtDate(a.createdAt)}</div>
+            </div>
           </div>
           <p class="font-semibold text-slate-800 text-sm mb-1">${a.itemName}</p>
           <p class="text-xs text-slate-400 mb-3">${a.categoryName}</p>
@@ -617,6 +623,7 @@ function renderPanel() {
           <p class="text-xs text-slate-400 mt-0.5">${new Date().toLocaleString('es-PE',{weekday:'long',hour:'2-digit',minute:'2-digit'})} · <span class="text-green-600">● En vivo</span></p>
         </div>
         <button onclick="clearAttended()" class="text-xs font-semibold px-3 py-1.5 bg-orange-50 border border-orange-200 text-orange-600 rounded-full hover:bg-orange-100">Limpiar atendidas</button>
+      <button onclick="toggleQuickBlock()" class="text-xs font-semibold px-3 py-1.5 bg-slate-100 border border-slate-200 text-slate-600 rounded-full hover:bg-slate-200">🍹 Cócteles: <span id="quickBlockStatus">...</span></button>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         ${[['Pendientes',pend,'text-[#ff8c42]'],['En Atención',att,'text-[#0041a3]'],['Atendidas',done,'text-[#00c0d0]'],['Alta Prioridad',high,'text-[#ff6751]']].map(([l,v,c])=>`
@@ -633,6 +640,7 @@ function renderPanel() {
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">${cards}</div>
     </div>`);
+  requestAnimationFrame(updateQuickBlockBtn);
 }
 
 window.setPFilter = v => { panelFilter=v; renderPanel(); };
@@ -642,6 +650,20 @@ window.setStatus  = async function(id, status) {
   if (status==='attended')  u.completedAt = serverTimestamp();
   await updateDoc(doc(db,'alerts',id), u);
 };
+window.toggleQuickBlock = async function() {
+  await window.toggleBlock('cocteles');
+  updateQuickBlockBtn();
+};
+
+function updateQuickBlockBtn() {
+  const btn = document.getElementById('quickBlockStatus');
+  if (btn) {
+    const blocked = blockedCats['cocteles'];
+    btn.textContent = blocked ? '🚫 Bloqueado' : '✓ Activo';
+    btn.className = blocked ? 'text-red-600 font-bold' : 'text-green-600 font-bold';
+  }
+}
+
 window.clearAttended = () => {
   alerts.filter(a=>a.status==='attended').forEach(a=>updateDoc(doc(db,'alerts',a.id),{_cleared:true}));
 };
@@ -695,6 +717,8 @@ function renderReportes() {
       <div class="flex items-center justify-between flex-wrap gap-3">
         <h1 class="text-xl font-bold text-[#00164f]">Reportes y Analítica</h1>
         <div class="flex gap-2 flex-wrap items-center">
+          <button onclick="exportExcel()" class="text-xs font-semibold px-3 py-1.5 rounded-full border bg-green-50 border-green-200 text-green-700 hover:bg-green-100">📊 Excel</button>
+          <button onclick="exportPDF()" class="text-xs font-semibold px-3 py-1.5 rounded-full border bg-red-50 border-red-200 text-red-700 hover:bg-red-100">📄 PDF</button>
           ${rBtn('7d','Últimos 7 días')}${rBtn('30d','Últimos 30 días')}${rBtn('all','Todo')}
           <select onchange="setRRoom(this.value)" class="text-xs border border-slate-200 rounded-full px-3 py-1.5 bg-white text-slate-600 focus:outline-none focus:border-[#0041a3]">
             <option value="all">Todas las salas</option>${roomOpts}
@@ -1046,6 +1070,131 @@ function renderAdminUsuariosContent() {
 
 window.changeRole   = async (uid,role)  => await updateDoc(doc(db,'users',uid),{role});
 window.toggleActive = async (uid,val)   => await updateDoc(doc(db,'users',uid),{active:val});
+
+// ══════════════════════════════════════════════════════════
+//  EXPORTAR EXCEL Y PDF
+// ══════════════════════════════════════════════════════════
+window.exportExcel = function() {
+  const cutoff = reportRange==='7d' ? 7 : reportRange==='30d' ? 30 : 9999;
+  const since  = new Date(Date.now() - cutoff*86400000);
+  let data = alerts.filter(a=>a.createdAt>=since);
+  if (reportRoom!=='all') data = data.filter(a=>a.roomId===reportRoom);
+
+  const rows = data.map(a => ({
+    'Sala':       a.roomName,
+    'Solicitud':  a.itemName,
+    'Categoría':  a.categoryName,
+    'Fecha':      fmtDate(a.createdAt),
+    'Hora':       fmtTime(a.createdAt),
+    'Estado':     {pending:'Pendiente',attending:'En Atención',attended:'Atendida'}[a.status],
+    'Prioridad':  {high:'Alta',medium:'Media',low:'Baja'}[a.priority],
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  // Ancho de columnas
+  ws['!cols'] = [18,22,18,10,8,14,10].map(w=>({wch:w}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Solicitudes');
+
+  // Hoja resumen por sala
+  const bySala = {};
+  data.forEach(a=>{
+    if(!bySala[a.roomName]) bySala[a.roomName]={sala:a.roomName,total:0,atendidas:0};
+    bySala[a.roomName].total++;
+    if(a.status==='attended') bySala[a.roomName].atendidas++;
+  });
+  const resumen = Object.values(bySala).map(r=>({
+    'Sala': r.sala, 'Total': r.total, 'Atendidas': r.atendidas,
+    '% Atención': r.total ? Math.round(r.atendidas/r.total*100)+'%' : '0%'
+  }));
+  const ws2 = XLSX.utils.json_to_sheet(resumen);
+  ws2['!cols'] = [20,8,10,12].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb, ws2, 'Resumen por Sala');
+
+  const fecha = new Date().toLocaleDateString('es-PE').replace(/\//g,'-');
+  XLSX.writeFile(wb, `Inteligo-AlertApp-Reporte-${fecha}.xlsx`);
+};
+
+window.exportPDF = function() {
+  const cutoff = reportRange==='7d' ? 7 : reportRange==='30d' ? 30 : 9999;
+  const since  = new Date(Date.now() - cutoff*86400000);
+  let data = alerts.filter(a=>a.createdAt>=since);
+  if (reportRoom!=='all') data = data.filter(a=>a.roomId===reportRoom);
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+  // Header
+  doc.setFillColor(0, 22, 79);
+  doc.rect(0, 0, 297, 20, 'F');
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(14); doc.setFont('helvetica','bold');
+  doc.text('Inteligo AlertApp — Reporte de Solicitudes', 14, 13);
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.text(new Date().toLocaleDateString('es-PE', {day:'2-digit',month:'long',year:'numeric'}), 250, 13);
+
+  // KPIs
+  const pend = data.filter(a=>a.status==='pending').length;
+  const att  = data.filter(a=>a.status==='attending').length;
+  const done = data.filter(a=>a.status==='attended').length;
+  const high = data.filter(a=>a.priority==='high').length;
+  doc.setTextColor(0,22,79); doc.setFontSize(10); doc.setFont('helvetica','bold');
+  doc.text(`Total: ${data.length}`, 14, 30);
+  doc.text(`Alta prioridad: ${high}`, 60, 30);
+  doc.text(`Pendientes: ${pend}`, 110, 30);
+  doc.text(`En Atención: ${att}`, 160, 30);
+  doc.text(`Atendidas: ${done}`, 220, 30);
+
+  // Tabla principal
+  const rows = data.slice(0,200).map(a => [
+    a.roomName, a.itemName, a.categoryName,
+    fmtDate(a.createdAt)+' '+fmtTime(a.createdAt),
+    {pending:'Pendiente',attending:'En Atención',attended:'Atendida'}[a.status],
+    {high:'Alta',medium:'Media',low:'Baja'}[a.priority],
+  ]);
+
+  doc.autoTable({
+    startY: 35,
+    head: [['Sala','Solicitud','Categoría','Fecha y Hora','Estado','Prioridad']],
+    body: rows,
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [0,65,163], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [240, 245, 255] },
+    columnStyles: { 0:{cellWidth:35}, 1:{cellWidth:50}, 2:{cellWidth:35}, 3:{cellWidth:40}, 4:{cellWidth:28}, 5:{cellWidth:22} },
+    margin: { left: 14, right: 14 },
+  });
+
+  // Resumen por sala en nueva página
+  doc.addPage();
+  doc.setFillColor(0, 22, 79);
+  doc.rect(0, 0, 297, 20, 'F');
+  doc.setTextColor(255,255,255); doc.setFontSize(13); doc.setFont('helvetica','bold');
+  doc.text('Resumen por Sala', 14, 13);
+
+  const bySala = {};
+  data.forEach(a=>{
+    if(!bySala[a.roomName]) bySala[a.roomName]={total:0,atendidas:0,alta:0};
+    bySala[a.roomName].total++;
+    if(a.status==='attended') bySala[a.roomName].atendidas++;
+    if(a.priority==='high') bySala[a.roomName].alta++;
+  });
+  const resRows = Object.entries(bySala).sort((a,b)=>b[1].total-a[1].total).map(([sala,d])=>[
+    sala, d.total, d.alta, d.atendidas,
+    d.total ? Math.round(d.atendidas/d.total*100)+'%' : '0%'
+  ]);
+  doc.autoTable({
+    startY: 25,
+    head: [['Sala','Total','Alta Prioridad','Atendidas','% Atención']],
+    body: resRows,
+    styles: { fontSize: 10, cellPadding: 3 },
+    headStyles: { fillColor: [0,65,163], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [240, 245, 255] },
+    margin: { left: 14, right: 14 },
+  });
+
+  const fecha = new Date().toLocaleDateString('es-PE').replace(/\//g,'-');
+  doc.save(`Inteligo-AlertApp-Reporte-${fecha}.pdf`);
+};
 
 // ══════════════════════════════════════════════════════════
 //  HELPERS
